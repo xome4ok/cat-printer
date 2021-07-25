@@ -81,9 +81,12 @@ energy = {
 contrast = 1
 
 PrinterWidth = 384
+
 ImgPrintSpeed = [0x23]
 BlankSpeed = [0x19]
-PacketLength = 30  # This is the first value I tried; it might be too low
+
+packet_length = 60
+throttle = 0.01
 
 address = None
 PrinterCharacteristic = "0000AE01-0000-1000-8000-00805F9B34FB"
@@ -143,9 +146,10 @@ async def connect_and_send(data):
 
         while data:
             # Cut the command stream up into pieces small enough for the printer to handle
-            await client.write_gatt_char(PrinterCharacteristic, data[:PacketLength])
-            data = data[PacketLength:]
-            await asyncio.sleep(0.01)
+            await client.write_gatt_char(PrinterCharacteristic, data[:packet_length])
+            data = data[packet_length:]
+            if throttle != None:
+                await asyncio.sleep(throttle)
 
 
 def request_status():
@@ -232,12 +236,22 @@ parser.add_argument("-A", "--address",
 parser.add_argument("-D", "--debug",
                     help="output notifications received from printer, in hex",
                     action="store_true")
+throttle_args = parser.add_mutually_exclusive_group()
+throttle_args.add_argument("-t", "--throttle", type=float, default=throttle,
+                           help="delay between sending command queue packets, in seconds",)
+throttle_args.add_argument("-T", "--no-throttle",
+                           help="don't wait while sending data",
+                           action="store_const", dest="throttle", const=None)
+parser.add_argument("-p", "--packetsize", type=int, default=packet_length,
+                    help="length of a command queue packet, in bytes")
 args = parser.parse_args()
 debug = args.debug
 if args.contrast:
     contrast = args.contrast
 if args.address:
     address = args.address.replace(':', '').upper()
+throttle = args.throttle
+packet_length = args.packetsize
 
 image = PIL.Image.open(args.filename)
 print_data = request_status() + render_image(image) + blank_paper()
