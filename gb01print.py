@@ -240,7 +240,7 @@ feed_args.add_argument("-E", "--no-eject",
                        help="don't feed blank paper after printing the image",
                        action="store_true")
 feed_args.add_argument("-f", "--feed", type=int, default=feed_lines, metavar="LINES",
-                       help="amount of printed pixel lines' worth of blank paper to feed")
+                       help="amount of blank paper to feed (default: {})".format(feed_lines))
 contrast_args = parser.add_mutually_exclusive_group()
 contrast_args.add_argument("-l", "--light",
                            help="use less energy for light contrast",
@@ -258,12 +258,12 @@ parser.add_argument("-D", "--debug",
                     action="store_true")
 throttle_args = parser.add_mutually_exclusive_group()
 throttle_args.add_argument("-t", "--throttle", type=float, default=throttle, metavar="SECONDS",
-                           help="delay between sending command queue packets",)
+                           help="delay between sending command queue packets (default: {})".format(throttle),)
 throttle_args.add_argument("-T", "--no-throttle",
                            help="don't wait while sending data",
                            action="store_const", dest="throttle", const=None)
 parser.add_argument("-p", "--packetsize", type=int, default=packet_length, metavar="BYTES",
-                    help="length of a command queue packet")
+                    help="length of a command queue packet (default: {})".format(packet_length))
 args = parser.parse_args()
 debug = args.debug
 if args.contrast:

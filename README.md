@@ -11,7 +11,9 @@ It will attempt to load the file as an image,
 connect to the first Bluetooth low energy device called "GB01" it finds,
 and print the image.
 
-    usage: gb01print.py [-h] [-e] [-E | -f LINES] [-l | -m | -d] [-A ADDRESS] [-D] [-t SECONDS | -T] [-p BYTES] [filename]
+    usage: gb01print.py [-h] [-e] [-E | -f LINES] [-l | -m | -d] [-A ADDRESS] [-D]
+                        [-t SECONDS | -T] [-p BYTES]
+                        [filename]
     
     Prints a given image to a GB01 thermal printer.
     
@@ -23,7 +25,7 @@ and print the image.
       -e, --eject           don't print an image, just feed some blank paper
       -E, --no-eject        don't feed blank paper after printing the image
       -f LINES, --feed LINES
-                            amount of printed pixel lines' worth of blank paper to feed
+                            amount of blank paper to feed (default: 112)
       -l, --light           use less energy for light contrast
       -m, --medium          use moderate energy for moderate contrast
       -d, --dark            use more energy for high contrast
@@ -31,7 +33,7 @@ and print the image.
                             MAC address of printer in hex (rightmost digits, colons optional)
       -D, --debug           output notifications received from printer, in hex
       -t SECONDS, --throttle SECONDS
-                            delay between sending command queue packets
+                            delay between sending command queue packets (default: 0.01)
       -T, --no-throttle     don't wait while sending data
       -p BYTES, --packetsize BYTES
-                            length of a command queue packet
+                            length of a command queue packet (default: 60)
