@@ -20,6 +20,8 @@ and print the image.
     
     optional arguments:
       -h, --help            show this help message and exit
+      -e, --eject           don't print an image, just feed some blank paper
+      -E, --no-eject        don't feed blank paper after printing the image     
       -l, --light           use less energy for light contrast
       -m, --medium          use moderate energy for moderate contrast
       -d, --dark            use more energy for high contrast

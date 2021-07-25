@@ -219,8 +219,15 @@ def blank_paper():
 
 parser = argparse.ArgumentParser(
     description="Prints a given image to a GB01 thermal printer.")
-parser.add_argument("filename",
-                    help="file name of an image to print")
+name_args = parser.add_mutually_exclusive_group(required=True)
+name_args.add_argument("filename", nargs='?',
+                       help="file name of an image to print")
+name_args.add_argument("-e", "--eject",
+                       help="don't print an image, just feed some blank paper",
+                       action="store_true")
+parser.add_argument("-E", "--no-eject",
+                    help="don't feed blank paper after printing the image",
+                    action="store_true")
 contrast_args = parser.add_mutually_exclusive_group()
 contrast_args.add_argument("-l", "--light",
                            help="use less energy for light contrast",
@@ -253,7 +260,11 @@ if args.address:
 throttle = args.throttle
 packet_length = args.packetsize
 
-image = PIL.Image.open(args.filename)
-print_data = request_status() + render_image(image) + blank_paper()
+print_data = request_status()
+if not args.eject:
+    image = PIL.Image.open(args.filename)
+    print_data = print_data + render_image(image)
+if not args.no_eject:
+    print_data = print_data + blank_paper()
 loop = asyncio.get_event_loop()
 loop.run_until_complete(connect_and_send(print_data))
