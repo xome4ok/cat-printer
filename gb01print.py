@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import argparse
 
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
@@ -208,7 +209,11 @@ def render_image(img):
     return cmdqueue
 
 
-image = PIL.Image.open(sys.argv[1])
+parser = argparse.ArgumentParser()
+parser.add_argument("filename", help="file name of an image to print")
+args = parser.parse_args()
+
+image = PIL.Image.open(args.filename)
 printdata = render_image(image)
 loop = asyncio.get_event_loop()
 loop.run_until_complete(connect_and_send(printdata))
