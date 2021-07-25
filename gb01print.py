@@ -2,6 +2,7 @@ import asyncio
 import platform
 import time
 import os
+import sys
 
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
@@ -143,7 +144,7 @@ async def connect_and_send(data):
                 await asyncio.sleep(0)
 
 
-def drawTestPattern():
+def renderimage(image):
         cmdqueue = []
         # Ask the printer how it's doing
         cmdqueue += formatMessage(GetDevState, [0x00])
@@ -158,17 +159,23 @@ def drawTestPattern():
         # not entirely sure what this does
         cmdqueue += formatMessage(OtherFeedPaper, ImgPrintSpeed)
 
-        image = PIL.Image.open(os.path.abspath(os.path.dirname(__file__)) + "/image.png")
         if image.width > PrinterWidth:
             # image is wider than printer resolution; scale it down proportionately
             height = int(image.height * (PrinterWidth / image.width))
             image = image.resize((PrinterWidth, height))
+        if image.width < (PrinterWidth // 2):
+            # scale up to largest whole multiple 
+            width = image.width * (PrinterWidth // image.width)
+            height = image.height * (PrinterWidth // image.width)
+            image = image.resize((width, height), resample=PIL.Image.NEAREST)
         # convert image to black-and-white 1bpp color format
         image = image.convert("1")
         if image.width < PrinterWidth:
-            # image is narrower than printer resolution; pad it out with white pixels
+            # image is narrower than printer resolution
+            # pad it out with white pixels
+            pad_amount = (PrinterWidth - image.width) // 2
             padded_image = PIL.Image.new("1", (PrinterWidth, image.height), 1)
-            padded_image.paste(image)
+            padded_image.paste(image, box=(pad_amount, 0))
             image = padded_image
 
         for y in range(0, image.height):
@@ -199,7 +206,7 @@ def drawTestPattern():
 
         return cmdqueue
 
-
-printdata = drawTestPattern()
+image = PIL.Image.open(sys.argv[1])
+printdata = renderimage(image)
 loop = asyncio.get_event_loop()
 loop.run_until_complete(connect_and_send(printdata))
