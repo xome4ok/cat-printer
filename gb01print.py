@@ -32,13 +32,15 @@ crc8_table = [
     0xfa, 0xfd, 0xf4, 0xf3
 ]
 
+
 def crc8(data):
     crc = 0
     for byte in data:
         crc = crc8_table[(crc ^ byte) & 0xFF]
     return crc & 0xFF
 
-# General message format:  
+
+# General message format:
 # Magic number: 2 bytes 0x51, 0x78
 # Command: 1 byte
 # 0x00
@@ -47,31 +49,33 @@ def crc8(data):
 # Data: Data Length bytes
 # CRC8 of Data: 1 byte
 # 0xFF
-def formatMessage(command, data):
-    data = [ 0x51, 0x78 ] + [command] + [0x00] + [len(data)] + [0x00] + data + [crc8(data)] + [0xFF]
+def format_message(command, data):
+    data = [0x51, 0x78] + [command] + [0x00] + [len(data)] + [0x00] + data + [crc8(data)] + [0xFF]
     return data
 
-# Commands
-RetractPaper = 0xA0     # Data: Number of steps to go back
-FeedPaper = 0xA1        # Data: Number of steps to go forward
-DrawBitmap = 0xA2       # Data: Line to draw. 0 bit -> don't draw pixel, 1 bit -> draw pixel
-GetDevState = 0xA3      # Data: 0
-ControlLattice = 0xA6   # Data: Eleven bytes, all constants. One set used before printing, one after.
-GetDevInfo = 0xA8       # Data: 0
-OtherFeedPaper = 0xBD   # Data: one byte, set to a device-specific "Speed" value before printing and to 0x19 before feeding blank paper
-DrawingMode = 0xBE      # Data: 1 for Text, 0 for Images
-SetEnergy = 0xAF        # Data: 1 - 0xFFFF
-SetQuality = 0xA4       # Data: 0x31 - 0x35. APK always sets 0x33 for GB01
 
-PrintLattice = [ 0xAA, 0x55, 0x17, 0x38, 0x44, 0x5F, 0x5F, 0x5F, 0x44, 0x38, 0x2C ]
-FinishLattice = [ 0xAA, 0x55, 0x17, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x17 ]
-XOff = ( 0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x10, 0x70, 0xFF )
-XOn = ( 0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x00, 0x00, 0xFF )
+# Commands
+RetractPaper = 0xA0  # Data: Number of steps to go back
+FeedPaper = 0xA1  # Data: Number of steps to go forward
+DrawBitmap = 0xA2  # Data: Line to draw. 0 bit -> don't draw pixel, 1 bit -> draw pixel
+GetDevState = 0xA3  # Data: 0
+ControlLattice = 0xA6  # Data: Eleven bytes, all constants. One set used before printing, one after.
+GetDevInfo = 0xA8  # Data: 0
+OtherFeedPaper = 0xBD  # Data: one byte, set to a device-specific "Speed" value before printing
+#                              and to 0x19 before feeding blank paper
+DrawingMode = 0xBE  # Data: 1 for Text, 0 for Images
+SetEnergy = 0xAF  # Data: 1 - 0xFFFF
+SetQuality = 0xA4  # Data: 0x31 - 0x35. APK always sets 0x33 for GB01
+
+PrintLattice = [0xAA, 0x55, 0x17, 0x38, 0x44, 0x5F, 0x5F, 0x5F, 0x44, 0x38, 0x2C]
+FinishLattice = [0xAA, 0x55, 0x17, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x17]
+XOff = (0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x10, 0x70, 0xFF)
+XOn = (0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x00, 0x00, 0xFF)
 
 PrinterWidth = 384
-ImgPrintSpeed = [ 0x23 ]
-BlankSpeed = [ 0x19 ]
-PacketLength = 30   # This is the first value I tried; it might be too low
+ImgPrintSpeed = [0x23]
+BlankSpeed = [0x19]
+PacketLength = 30  # This is the first value I tried; it might be too low
 
 PrinterAddress = ""
 PrinterCharacteristic = "0000AE01-0000-1000-8000-00805F9B34FB"
@@ -130,7 +134,7 @@ async def connect_and_send(data):
         # Set up callback to handle messages from the printer
         await client.start_notify(NotifyCharacteristic, notification_handler)
 
-        while(data):
+        while data:
             # Cut the command stream up into pieces small enough for the printer to handle
             await client.write_gatt_char(PrinterCharacteristic, data[:PacketLength])
             data = data[PacketLength:]
@@ -141,69 +145,70 @@ async def connect_and_send(data):
                 await asyncio.sleep(0)
 
 
-def renderimage(image):
-        cmdqueue = []
-        # Ask the printer how it's doing
-        cmdqueue += formatMessage(GetDevState, [0x00])
-        # Set quality to standard
-        cmdqueue += formatMessage(SetQuality, [0x33])
-        # start and/or set up the lattice, whatever that is
-        cmdqueue += formatMessage(ControlLattice, PrintLattice)
-        # Set energy used to a moderate level
-        cmdqueue += formatMessage(SetEnergy, [0xE0, 0x2E])
-        # Set mode to image mode
-        cmdqueue += formatMessage(DrawingMode, [0])
-        # not entirely sure what this does
-        cmdqueue += formatMessage(OtherFeedPaper, ImgPrintSpeed)
+def render_image(img):
+    cmdqueue = []
+    # Ask the printer how it's doing
+    cmdqueue += format_message(GetDevState, [0x00])
+    # Set quality to standard
+    cmdqueue += format_message(SetQuality, [0x33])
+    # start and/or set up the lattice, whatever that is
+    cmdqueue += format_message(ControlLattice, PrintLattice)
+    # Set energy used to a moderate level
+    cmdqueue += format_message(SetEnergy, [0xE0, 0x2E])
+    # Set mode to image mode
+    cmdqueue += format_message(DrawingMode, [0])
+    # not entirely sure what this does
+    cmdqueue += format_message(OtherFeedPaper, ImgPrintSpeed)
 
-        if image.width > PrinterWidth:
-            # image is wider than printer resolution; scale it down proportionately
-            height = int(image.height * (PrinterWidth / image.width))
-            image = image.resize((PrinterWidth, height))
-        if image.width < (PrinterWidth // 2):
-            # scale up to largest whole multiple 
-            width = image.width * (PrinterWidth // image.width)
-            height = image.height * (PrinterWidth // image.width)
-            image = image.resize((width, height), resample=PIL.Image.NEAREST)
-        # convert image to black-and-white 1bpp color format
-        image = image.convert("1")
-        if image.width < PrinterWidth:
-            # image is narrower than printer resolution
-            # pad it out with white pixels
-            pad_amount = (PrinterWidth - image.width) // 2
-            padded_image = PIL.Image.new("1", (PrinterWidth, image.height), 1)
-            padded_image.paste(image, box=(pad_amount, 0))
-            image = padded_image
+    if img.width > PrinterWidth:
+        # image is wider than printer resolution; scale it down proportionately
+        height = int(img.height * (PrinterWidth / img.width))
+        img = img.resize((PrinterWidth, height))
+    if img.width < (PrinterWidth // 2):
+        # scale up to largest whole multiple
+        width = img.width * (PrinterWidth // img.width)
+        height = img.height * (PrinterWidth // img.width)
+        img = img.resize((width, height), resample=PIL.Image.NEAREST)
+    # convert image to black-and-white 1bpp color format
+    img = img.convert("1")
+    if img.width < PrinterWidth:
+        # image is narrower than printer resolution
+        # pad it out with white pixels
+        pad_amount = (PrinterWidth - img.width) // 2
+        padded_image = PIL.Image.new("1", (PrinterWidth, img.height), 1)
+        padded_image.paste(img, box=(pad_amount, 0))
+        img = padded_image
 
-        for y in range(0, image.height):
-            bmp = []
-            bit = 0
-            # pack image data into 8 pixels per byte
-            for x in range(0, image.width):
-                if bit % 8 == 0:
-                    bmp += [0x00]
-                bmp[int(bit / 8)] >>= 1
-                if not image.getpixel((x, y)):
-                    bmp[int(bit / 8)] |= 0x80
-                else:
-                    bmp[int(bit / 8)] |= 0
+    for y in range(0, img.height):
+        bmp = []
+        bit = 0
+        # pack image data into 8 pixels per byte
+        for x in range(0, img.width):
+            if bit % 8 == 0:
+                bmp += [0x00]
+            bmp[int(bit / 8)] >>= 1
+            if not img.getpixel((x, y)):
+                bmp[int(bit / 8)] |= 0x80
+            else:
+                bmp[int(bit / 8)] |= 0
 
-                bit += 1
+            bit += 1
 
-            cmdqueue += formatMessage(DrawBitmap, bmp)
+        cmdqueue += format_message(DrawBitmap, bmp)
 
-        # Feed extra paper for image to be visible
-        cmdqueue += formatMessage(OtherFeedPaper, BlankSpeed)
-        cmdqueue += formatMessage(FeedPaper, [0x70, 0x00])
+    # Feed extra paper for image to be visible
+    cmdqueue += format_message(OtherFeedPaper, BlankSpeed)
+    cmdqueue += format_message(FeedPaper, [0x70, 0x00])
 
-        # iPrint sends another GetDevState request at this point, but we're not staying long enough for an answer
+    # iPrint sends another GetDevState request at this point, but we're not staying long enough for an answer
 
-        # finish the lattice, whatever that means
-        cmdqueue += formatMessage(ControlLattice, FinishLattice)
+    # finish the lattice, whatever that means
+    cmdqueue += format_message(ControlLattice, FinishLattice)
 
-        return cmdqueue
+    return cmdqueue
+
 
 image = PIL.Image.open(sys.argv[1])
-printdata = renderimage(image)
+printdata = render_image(image)
 loop = asyncio.get_event_loop()
 loop.run_until_complete(connect_and_send(printdata))
