@@ -232,7 +232,8 @@ parser.add_argument("-D", "--debug",
                     action="store_true")
 args = parser.parse_args()
 debug = args.debug
-contrast = args.contrast
+if args.contrast:
+    contrast = args.contrast
 
 image = PIL.Image.open(args.filename)
 print_data = request_status() + render_image(image) + blank_paper()
