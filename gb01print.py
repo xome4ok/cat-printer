@@ -83,8 +83,8 @@ PrinterCharacteristic = "0000AE01-0000-1000-8000-00805F9B34FB"
 NotifyCharacteristic = "0000AE02-0000-1000-8000-00805F9B34FB"
 device = None
 
-# global flag for flow control signaling, because I don't know the right way to do this
-transmit = True
+# show notification data
+debug = False
 
 
 def detect_printer(detected, advertisement_data):
@@ -98,24 +98,23 @@ def detect_printer(detected, advertisement_data):
 
 
 def notification_handler(sender, data):
-    global transmit
-    print("{0}: [ {1} ]".format(sender, " ".join("{:02X}".format(x) for x in data)))
+    global debug
+    if debug:
+        print("{0}: [ {1} ]".format(sender, " ".join("{:02X}".format(x) for x in data)))
     if tuple(data) == XOff:
-        print("Pausing transmission.")
-        transmit = False
-        return
-    if tuple(data) == XOn:
-        print("Resuming transmission.")
-        transmit = True
+        print("ERROR: printer data overrun!")
         return
     if data[2] == GetDevState:
-        print("printer status byte: {:08b}".format(data[6]))
+        if data[6] & 0b1000:
+            print("warning: low battery! print quality might be affected…")
+        # print("printer status byte: {:08b}".format(data[6]))
         # xxxxxxx1 no_paper ("No paper.")
         # xxxxxx10 paper_positions_open ("Warehouse.")
         # xxxxx100 too_hot ("Too hot, please let me take a break.")
         # xxxx1000 no_power_please_charge ("I have no electricity, please charge")
         # I don't know if multiple status bits can be on at once, but if they are, then iPrint won't detect them.
         # In any case, I think the low battery flag is the only one the GB01 uses.
+        # It also turns out this flag might not turn on, even when the battery's so low the printer shuts itself off…
         return
 
 
@@ -140,16 +139,14 @@ async def connect_and_send(data):
             await client.write_gatt_char(PrinterCharacteristic, data[:PacketLength])
             data = data[PacketLength:]
             await asyncio.sleep(0.01)
-            while not transmit:
-                # Pause transmission per printer request.
-                # Note: doing it this way does not appear to actually work.
-                await asyncio.sleep(0)
+
+
+def request_status():
+    return format_message(GetDevState, [0x00])
 
 
 def render_image(img):
     cmdqueue = []
-    # Ask the printer how it's doing
-    cmdqueue += format_message(GetDevState, [0x00])
     # Set quality to standard
     cmdqueue += format_message(SetQuality, [0x33])
     # start and/or set up the lattice, whatever that is
@@ -197,23 +194,26 @@ def render_image(img):
 
         cmdqueue += format_message(DrawBitmap, bmp)
 
-    # Feed extra paper for image to be visible
-    cmdqueue += format_message(OtherFeedPaper, BlankSpeed)
-    cmdqueue += format_message(FeedPaper, [0x70, 0x00])
-
-    # iPrint sends another GetDevState request at this point, but we're not staying long enough for an answer
-
     # finish the lattice, whatever that means
     cmdqueue += format_message(ControlLattice, FinishLattice)
 
     return cmdqueue
 
 
+def blank_paper():
+    # Feed extra paper for image to be visible
+    return format_message(OtherFeedPaper, BlankSpeed) \
+           + format_message(FeedPaper, [0x70, 0x00])
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("filename", help="file name of an image to print")
+parser.add_argument("--debug", help="output notifications received from printer, in hex",
+                    action="store_true")
 args = parser.parse_args()
+debug = args.debug
 
 image = PIL.Image.open(args.filename)
-printdata = render_image(image)
+print_data = request_status() + render_image(image) + blank_paper()
 loop = asyncio.get_event_loop()
-loop.run_until_complete(connect_and_send(printdata))
+loop.run_until_complete(connect_and_send(print_data))
