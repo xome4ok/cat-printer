@@ -1,7 +1,4 @@
 import asyncio
-import platform
-import time
-import os
 import sys
 
 from bleak import BleakClient, BleakScanner
