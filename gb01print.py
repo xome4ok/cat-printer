@@ -73,6 +73,13 @@ FinishLattice = [0xAA, 0x55, 0x17, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1
 XOff = (0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x10, 0x70, 0xFF)
 XOn = (0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x00, 0x00, 0xFF)
 
+energy = {
+    0: [0x40, 0x1F],
+    1: [0xE0, 0x2E],
+    2: [0x5C, 0x44]
+}
+contrast = 1
+
 PrinterWidth = 384
 ImgPrintSpeed = [0x23]
 BlankSpeed = [0x19]
@@ -151,8 +158,8 @@ def render_image(img):
     cmdqueue += format_message(SetQuality, [0x33])
     # start and/or set up the lattice, whatever that is
     cmdqueue += format_message(ControlLattice, PrintLattice)
-    # Set energy used to a moderate level
-    cmdqueue += format_message(SetEnergy, [0xE0, 0x2E])
+    # Set energy used
+    cmdqueue += format_message(SetEnergy, energy[contrast])
     # Set mode to image mode
     cmdqueue += format_message(DrawingMode, [0])
     # not entirely sure what this does
@@ -206,12 +213,26 @@ def blank_paper():
            + format_message(FeedPaper, [0x70, 0x00])
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("filename", help="file name of an image to print")
-parser.add_argument("--debug", help="output notifications received from printer, in hex",
+parser = argparse.ArgumentParser(
+    description="Prints a given image to a GB01 thermal printer.")
+parser.add_argument("filename",
+                    help="file name of an image to print")
+contrast_args = parser.add_mutually_exclusive_group()
+contrast_args.add_argument("-l", "--light",
+                           help="use less energy for light contrast",
+                           action="store_const", dest="contrast", const=0)
+contrast_args.add_argument("-m", "--medium",
+                           help="use moderate energy for moderate contrast",
+                           action="store_const", dest="contrast", const=1)
+contrast_args.add_argument("-d", "--dark",
+                           help="use more energy for high contrast",
+                           action="store_const", dest="contrast", const=2)
+parser.add_argument("-D", "--debug",
+                    help="output notifications received from printer, in hex",
                     action="store_true")
 args = parser.parse_args()
 debug = args.debug
+contrast = args.contrast
 
 image = PIL.Image.open(args.filename)
 print_data = request_status() + render_image(image) + blank_paper()
