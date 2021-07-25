@@ -1,5 +1,4 @@
 import asyncio
-import sys
 import argparse
 
 from bleak import BleakClient, BleakScanner
@@ -55,6 +54,10 @@ def format_message(command, data):
     return data
 
 
+def printer_short(i):
+    return [i & 0xFF, (i >> 8) & 0xFF]
+
+
 # Commands
 RetractPaper = 0xA0  # Data: Number of steps to go back
 FeedPaper = 0xA1  # Data: Number of steps to go forward
@@ -74,9 +77,9 @@ XOff = (0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x10, 0x70, 0xFF)
 XOn = (0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x00, 0x00, 0xFF)
 
 energy = {
-    0: [0x40, 0x1F],
-    1: [0xE0, 0x2E],
-    2: [0x5C, 0x44]
+    0: printer_short(8000),
+    1: printer_short(12000),
+    2: printer_short(17500)
 }
 contrast = 1
 
@@ -84,6 +87,8 @@ PrinterWidth = 384
 
 ImgPrintSpeed = [0x23]
 BlankSpeed = [0x19]
+
+feed_lines = 112
 
 packet_length = 60
 throttle = 0.01
@@ -148,7 +153,7 @@ async def connect_and_send(data):
             # Cut the command stream up into pieces small enough for the printer to handle
             await client.write_gatt_char(PrinterCharacteristic, data[:packet_length])
             data = data[packet_length:]
-            if throttle != None:
+            if throttle is not None:
                 await asyncio.sleep(throttle)
 
 
@@ -213,8 +218,13 @@ def render_image(img):
 
 def blank_paper():
     # Feed extra paper for image to be visible
-    return format_message(OtherFeedPaper, BlankSpeed) \
-           + format_message(FeedPaper, [0x70, 0x00])
+    blank_commands = format_message(OtherFeedPaper, BlankSpeed)
+    count = feed_lines
+    while count:
+        feed = min(count, 0xFF)
+        blank_commands = blank_commands + format_message(FeedPaper, printer_short(feed))
+        count = count - feed
+    return blank_commands
 
 
 parser = argparse.ArgumentParser(
@@ -225,9 +235,12 @@ name_args.add_argument("filename", nargs='?',
 name_args.add_argument("-e", "--eject",
                        help="don't print an image, just feed some blank paper",
                        action="store_true")
-parser.add_argument("-E", "--no-eject",
-                    help="don't feed blank paper after printing the image",
-                    action="store_true")
+feed_args = parser.add_mutually_exclusive_group()
+feed_args.add_argument("-E", "--no-eject",
+                       help="don't feed blank paper after printing the image",
+                       action="store_true")
+feed_args.add_argument("-f", "--feed", type=int, default=feed_lines, metavar="LINES",
+                       help="amount of printed pixel lines' worth of blank paper to feed")
 contrast_args = parser.add_mutually_exclusive_group()
 contrast_args.add_argument("-l", "--light",
                            help="use less energy for light contrast",
@@ -244,13 +257,13 @@ parser.add_argument("-D", "--debug",
                     help="output notifications received from printer, in hex",
                     action="store_true")
 throttle_args = parser.add_mutually_exclusive_group()
-throttle_args.add_argument("-t", "--throttle", type=float, default=throttle,
-                           help="delay between sending command queue packets, in seconds",)
+throttle_args.add_argument("-t", "--throttle", type=float, default=throttle, metavar="SECONDS",
+                           help="delay between sending command queue packets",)
 throttle_args.add_argument("-T", "--no-throttle",
                            help="don't wait while sending data",
                            action="store_const", dest="throttle", const=None)
-parser.add_argument("-p", "--packetsize", type=int, default=packet_length,
-                    help="length of a command queue packet, in bytes")
+parser.add_argument("-p", "--packetsize", type=int, default=packet_length, metavar="BYTES",
+                    help="length of a command queue packet")
 args = parser.parse_args()
 debug = args.debug
 if args.contrast:
@@ -259,6 +272,7 @@ if args.address:
     address = args.address.replace(':', '').upper()
 throttle = args.throttle
 packet_length = args.packetsize
+feed_lines = args.feed
 
 print_data = request_status()
 if not args.eject:
