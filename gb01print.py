@@ -85,7 +85,7 @@ ImgPrintSpeed = [0x23]
 BlankSpeed = [0x19]
 PacketLength = 30  # This is the first value I tried; it might be too low
 
-PrinterAddress = ""
+address = None
 PrinterCharacteristic = "0000AE01-0000-1000-8000-00805F9B34FB"
 NotifyCharacteristic = "0000AE02-0000-1000-8000-00805F9B34FB"
 device = None
@@ -96,10 +96,10 @@ debug = False
 
 def detect_printer(detected, advertisement_data):
     global device
-    # This isn't necessarily a great way to detect the printer.
-    # It's the way the app does it, but the app has an actual UI where you can pick your device from a list.
-    # Ideally this function would filter for known characteristics, but I don't know how hard that would be or what
-    # kinds of problems it could cause. For now, I just want to get my printer working.
+    if address:
+        cut_addr = detected.address.replace(":", "")[-(len(address)):].upper()
+        if cut_addr != address:
+            return
     if detected.name == 'GB01':
         device = detected
 
@@ -136,7 +136,7 @@ async def connect_and_send(data):
     await scanner.stop()
 
     if not device:
-        raise BleakError(f"No device named GB01 could be found.")
+        raise BleakError(f"The printer was not found.")
     async with BleakClient(device) as client:
         # Set up callback to handle messages from the printer
         await client.start_notify(NotifyCharacteristic, notification_handler)
@@ -227,6 +227,8 @@ contrast_args.add_argument("-m", "--medium",
 contrast_args.add_argument("-d", "--dark",
                            help="use more energy for high contrast",
                            action="store_const", dest="contrast", const=2)
+parser.add_argument("-A", "--address",
+                    help="MAC address of printer in hex (rightmost digits, colons optional)")
 parser.add_argument("-D", "--debug",
                     help="output notifications received from printer, in hex",
                     action="store_true")
@@ -234,6 +236,8 @@ args = parser.parse_args()
 debug = args.debug
 if args.contrast:
     contrast = args.contrast
+if args.address:
+    address = args.address.replace(':', '').upper()
 
 image = PIL.Image.open(args.filename)
 print_data = request_status() + render_image(image) + blank_paper()
