@@ -184,6 +184,7 @@ def render_image(img):
         height = img.height * (PrinterWidth // img.width)
         img = img.resize((width, height), resample=PIL.Image.NEAREST)
     # convert image to black-and-white 1bpp color format
+    img = img.convert("RGB")
     img = img.convert("1")
     if img.width < PrinterWidth:
         # image is narrower than printer resolution
