@@ -152,7 +152,7 @@ async def connect_and_send(data):
 
         while data:
             # Cut the command stream up into pieces small enough for the printer to handle
-            await client.write_gatt_char(PrinterCharacteristic, data[:packet_length])
+            await client.write_gatt_char(PrinterCharacteristic, bytearray(data[:packet_length]))
             data = data[packet_length:]
             if throttle is not None:
                 await asyncio.sleep(throttle)
