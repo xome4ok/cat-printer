@@ -26,6 +26,8 @@ and print the image.
       -E, --no-eject        don't feed blank paper after printing the image
       -f LINES, --feed LINES
                             amount of blank paper to feed (default: 112)
+      --header LINES        feed blank paper before printing the image
+      --scale-feed          adjust blank paper feed proportionately when resizing image
       -l, --light           use less energy for light contrast
       -m, --medium          use moderate energy for moderate contrast
       -d, --dark            use more energy for high contrast

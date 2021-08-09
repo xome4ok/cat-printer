@@ -90,6 +90,8 @@ ImgPrintSpeed = [0x23]
 BlankSpeed = [0x19]
 
 feed_lines = 112
+header_lines = 0
+scale_feed = False
 
 packet_length = 60
 throttle = 0.01
@@ -162,7 +164,21 @@ def request_status():
     return format_message(GetDevState, [0x00])
 
 
+def blank_paper(lines):
+    # Feed extra paper for image to be visible
+    blank_commands = format_message(OtherFeedPaper, BlankSpeed)
+    count = lines
+    while count:
+        feed = min(count, 0xFF)
+        blank_commands = blank_commands + format_message(FeedPaper, printer_short(feed))
+        count = count - feed
+    return blank_commands
+
+
 def render_image(img):
+    global header_lines
+    global feed_lines
+
     cmdqueue = []
     # Set quality to standard
     cmdqueue += format_message(SetQuality, [0x33])
@@ -177,13 +193,18 @@ def render_image(img):
 
     if img.width > PrinterWidth:
         # image is wider than printer resolution; scale it down proportionately
-        height = int(img.height * (PrinterWidth / img.width))
-        img = img.resize((PrinterWidth, height))
+        scale = PrinterWidth / img.width
+        if scale_feed:
+            header_lines = int(header_lines * scale)
+            feed_lines = int(feed_lines * scale)
+        img = img.resize((PrinterWidth, int(img.height * scale)))
     if img.width < (PrinterWidth // 2):
         # scale up to largest whole multiple
-        width = img.width * (PrinterWidth // img.width)
-        height = img.height * (PrinterWidth // img.width)
-        img = img.resize((width, height), resample=PIL.Image.NEAREST)
+        scale = PrinterWidth // img.width
+        if scale_feed:
+            header_lines = int(header_lines * scale)
+            feed_lines = int(feed_lines * scale)
+        img = img.resize((img.width * scale, img.height * scale), resample=PIL.Image.NEAREST)
     # convert image to black-and-white 1bpp color format
     img = img.convert("RGB")
     img = img.convert("1")
@@ -194,6 +215,9 @@ def render_image(img):
         padded_image = PIL.Image.new("1", (PrinterWidth, img.height), 1)
         padded_image.paste(img, box=(pad_amount, 0))
         img = padded_image
+
+    if header_lines:
+        cmdqueue += blank_paper(header_lines)
 
     for y in range(0, img.height):
         bmp = []
@@ -218,17 +242,6 @@ def render_image(img):
     return cmdqueue
 
 
-def blank_paper():
-    # Feed extra paper for image to be visible
-    blank_commands = format_message(OtherFeedPaper, BlankSpeed)
-    count = feed_lines
-    while count:
-        feed = min(count, 0xFF)
-        blank_commands = blank_commands + format_message(FeedPaper, printer_short(feed))
-        count = count - feed
-    return blank_commands
-
-
 parser = argparse.ArgumentParser(
     description="Prints a given image to a GB01 thermal printer.")
 name_args = parser.add_mutually_exclusive_group(required=True)
@@ -243,6 +256,11 @@ feed_args.add_argument("-E", "--no-eject",
                        action="store_true")
 feed_args.add_argument("-f", "--feed", type=int, default=feed_lines, metavar="LINES",
                        help="amount of blank paper to feed (default: {})".format(feed_lines))
+parser.add_argument("--header", type=int, metavar="LINES",
+                    help="feed blank paper before printing the image")
+parser.add_argument("--scale-feed",
+                    help="adjust blank paper feed proportionately when resizing image",
+                    action="store_true")
 contrast_args = parser.add_mutually_exclusive_group()
 contrast_args.add_argument("-l", "--light",
                            help="use less energy for light contrast",
@@ -275,12 +293,15 @@ if args.address:
 throttle = args.throttle
 packet_length = args.packetsize
 feed_lines = args.feed
+header_lines = args.header
+if args.scale_feed:
+    scale_feed = True
 
 print_data = request_status()
 if not args.eject:
     image = PIL.Image.open(args.filename)
     print_data = print_data + render_image(image)
 if not args.no_eject:
-    print_data = print_data + blank_paper()
+    print_data = print_data + blank_paper(feed_lines)
 loop = asyncio.get_event_loop()
 loop.run_until_complete(connect_and_send(print_data))
