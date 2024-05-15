@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
+import os
 import asyncio
 import argparse
+import time
+import contextlib
 
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 
 import PIL.Image
+import PIL.ImageFont
+import PIL.ImageDraw
+import PIL.ImageChops
+import filetype
 
 # CRC8 table extracted from APK, pretty standard though
 crc8_table = (
@@ -89,9 +96,11 @@ PrinterWidth = 384
 ImgPrintSpeed = [0x23]
 BlankSpeed = [0x19]
 
-feed_lines = 112
+feed_lines = 55
 header_lines = 0
 scale_feed = False
+
+default_font_name = "HackNerdFontMono-Regular.ttf"
 
 packet_length = 60
 throttle = 0.01
@@ -111,7 +120,7 @@ def detect_printer(detected, advertisement_data):
         cut_addr = detected.address.replace(":", "")[-(len(address)):].upper()
         if cut_addr != address:
             return
-    if detected.name == 'GB01':
+    if detected.name in ('GB01', 'MX06'):
         device = detected
 
 
@@ -135,8 +144,8 @@ def notification_handler(sender, data):
         # It also turns out this flag might not turn on, even when the battery's so low the printer shuts itself off…
         return
 
-
-async def connect_and_send(data):
+@contextlib.asynccontextmanager
+async def connect():
     scanner = BleakScanner()
     scanner.register_detection_callback(detect_printer)
     await scanner.start()
@@ -147,18 +156,25 @@ async def connect_and_send(data):
     await scanner.stop()
 
     if not device:
-        raise BleakError(f"The printer was not found.")
+        raise BleakError("The printer was not found.")
     async with BleakClient(device) as client:
         # Set up callback to handle messages from the printer
         await client.start_notify(NotifyCharacteristic, notification_handler)
+        yield client
 
-        while data:
-            # Cut the command stream up into pieces small enough for the printer to handle
-            await client.write_gatt_char(PrinterCharacteristic, bytearray(data[:packet_length]))
-            data = data[packet_length:]
-            if throttle is not None:
-                await asyncio.sleep(throttle)
+async def send(client, data):
+    # Cut the command stream up into pieces small enough for the printer to handle
+    await client.write_gatt_char(PrinterCharacteristic, bytearray(data[:packet_length]))
+    new_data = data[packet_length:]
+    if throttle is not None:
+        await asyncio.sleep(throttle)
+    return new_data
 
+async def connect_and_send(data_iter):
+    async with connect() as client:
+        for data in data_iter:
+            while data:
+                data = await send(client, data)
 
 def request_status():
     return format_message(GetDevState, [0x00])
@@ -173,6 +189,45 @@ def blank_paper(lines):
         blank_commands = blank_commands + format_message(FeedPaper, printer_short(feed))
         count = count - feed
     return blank_commands
+
+
+def get_wrapped_text(text: str, font: PIL.ImageFont.ImageFont,
+                     line_length: int):
+    if font.getlength(text) <= line_length:
+        return text
+
+    lines = ['']
+    for word in text.split():
+        line = f'{lines[-1]} {word}'.strip()
+        if font.getlength(line) <= line_length:
+            lines[-1] = line
+        else:
+            lines.append(word)
+    return '\n'.join(lines)
+
+
+def trim(im):
+    bg = PIL.Image.new(im.mode, im.size, (255,255,255))
+    diff = PIL.ImageChops.difference(im, bg)
+    diff = PIL.ImageChops.add(diff, diff, 2.0)
+    bbox = diff.getbbox()
+    if bbox:
+        return im.crop((bbox[0],bbox[1],bbox[2],bbox[3]+10)) # don't cut off the end of the image
+
+
+def convert_text_to_img(text: list[str], font_name=default_font_name, font_size=30):
+    img = PIL.Image.new('RGB', (PrinterWidth, 5000), color = (255, 255, 255))
+    font = PIL.ImageFont.truetype(font_name, font_size)
+    
+    d = PIL.ImageDraw.Draw(img)
+    lines = []
+    for line in text:
+        lines.append(get_wrapped_text(line, font, PrinterWidth))
+    lines = "\n".join(lines)
+    lines = lines.replace("\n\n", "\n")
+    print(lines)
+    d.multiline_text((0,0), lines, fill=(0,0,0), align="left", font=font, spacing=0)
+    return trim(img)
 
 
 def render_image(img):
@@ -242,66 +297,154 @@ def render_image(img):
     return cmdqueue
 
 
-parser = argparse.ArgumentParser(
-    description="Prints a given image to a GB01 thermal printer.")
-name_args = parser.add_mutually_exclusive_group(required=True)
-name_args.add_argument("filename", nargs='?',
-                       help="file name of an image to print")
-name_args.add_argument("-e", "--eject",
-                       help="don't print an image, just feed some blank paper",
-                       action="store_true")
-feed_args = parser.add_mutually_exclusive_group()
-feed_args.add_argument("-E", "--no-eject",
-                       help="don't feed blank paper after printing the image",
-                       action="store_true")
-feed_args.add_argument("-f", "--feed", type=int, default=feed_lines, metavar="LINES",
-                       help="amount of blank paper to feed (default: {})".format(feed_lines))
-parser.add_argument("--header", type=int, metavar="LINES",
-                    help="feed blank paper before printing the image")
-parser.add_argument("--scale-feed",
-                    help="adjust blank paper feed proportionately when resizing image",
-                    action="store_true")
-contrast_args = parser.add_mutually_exclusive_group()
-contrast_args.add_argument("-l", "--light",
-                           help="use less energy for light contrast",
-                           action="store_const", dest="contrast", const=0)
-contrast_args.add_argument("-m", "--medium",
-                           help="use moderate energy for moderate contrast",
-                           action="store_const", dest="contrast", const=1)
-contrast_args.add_argument("-d", "--dark",
-                           help="use more energy for high contrast",
-                           action="store_const", dest="contrast", const=2)
-parser.add_argument("-A", "--address",
-                    help="MAC address of printer in hex (rightmost digits, colons optional)")
-parser.add_argument("-D", "--debug",
-                    help="output notifications received from printer, in hex",
-                    action="store_true")
-throttle_args = parser.add_mutually_exclusive_group()
-throttle_args.add_argument("-t", "--throttle", type=float, default=throttle, metavar="SECONDS",
-                           help="delay between sending command queue packets (default: {})".format(throttle),)
-throttle_args.add_argument("-T", "--no-throttle",
-                           help="don't wait while sending data",
-                           action="store_const", dest="throttle", const=None)
-parser.add_argument("-p", "--packetsize", type=int, default=packet_length, metavar="BYTES",
-                    help="length of a command queue packet (default: {})".format(packet_length))
-args = parser.parse_args()
-debug = args.debug
-if args.contrast:
-    contrast = args.contrast
-if args.address:
-    address = args.address.replace(':', '').upper()
-throttle = args.throttle
-packet_length = args.packetsize
-feed_lines = args.feed
-header_lines = args.header
-if args.scale_feed:
-    scale_feed = True
+def follow(file, sleep_sec=0.1):
+    """ Yield each line from a file as they are written.
+    `sleep_sec` is the time to sleep after empty reads. """
+    line = ''
+    while True:
+        tmp = file.readline()
+        if tmp is not None and tmp != "":
+            line += tmp
+            if line.endswith("\n"):
+                yield line
+                line = ''
+        elif sleep_sec:
+            time.sleep(sleep_sec)
 
-print_data = request_status()
-if not args.eject:
-    image = PIL.Image.open(args.filename)
-    print_data = print_data + render_image(image)
-if not args.no_eject:
-    print_data = print_data + blank_paper(feed_lines)
-loop = asyncio.get_event_loop()
-loop.run_until_complete(connect_and_send(print_data))
+def produce_text_print_data(eject: bool, no_eject: bool, text: str):
+    try:
+        print_data = request_status()
+        if not eject:
+            image = convert_text_to_img(text)
+            print_data = print_data + render_image(image)
+        if not no_eject:
+            print_data = print_data + blank_paper(feed_lines)
+        return print_data
+    except Exception as e:
+        print("!!! EXCEPTION !!!")
+        print(e)
+        return None
+
+
+def produce_print_data(eject: bool, no_eject: bool, assume_text: bool, filename: str, ):
+    print_data = request_status()
+    if not eject:
+        if assume_text:
+            kind = "text"
+        else:
+            file_type = filetype.guess(filename)
+            if file_type is None:
+                print("Undetermined file type")
+                exit(1)
+            kind = file_type.mime.split("/")[0]
+        if kind == "image":
+            image = PIL.Image.open(filename)
+        elif kind == "text":
+            with open(filename, "r") as f:
+                text = f.readlines()
+            image = convert_text_to_img(text)
+        else:
+            print(f"Unsupported file type: {file_type}")
+        print_data = print_data + render_image(image)
+    if not no_eject:
+        print_data = print_data + blank_paper(feed_lines)
+    return print_data
+
+
+async def pipe_server(pipe, eject, no_eject):
+    async with connect() as client:
+        with open(pipe, 'r') as file:
+            for line in follow(file):
+                data = produce_text_print_data(eject=eject, no_eject=no_eject, text=[line])
+                while data:
+                    data = await send(client, data)
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(
+        description="Prints a given image to a GB01 thermal printer.")
+    name_args = parser.add_mutually_exclusive_group(required=True)
+    name_args.add_argument("filename", nargs='?',
+                           help="file name of an image to print")
+    name_args.add_argument("-e", "--eject",
+                           help="don't print an image, just feed some blank paper",
+                           action="store_true")
+    feed_args = parser.add_mutually_exclusive_group()
+    feed_args.add_argument("-E", "--no-eject",
+                           help="don't feed blank paper after printing the image",
+                           action="store_true")
+    feed_args.add_argument("-f", "--feed", type=int, default=feed_lines, metavar="LINES",
+                           help="amount of blank paper to feed (default: {})".format(feed_lines))
+    parser.add_argument("--header", type=int, metavar="LINES",
+                        help="feed blank paper before printing the image")
+    parser.add_argument("--scale-feed",
+                        help="adjust blank paper feed proportionately when resizing image",
+                        action="store_true")
+    contrast_args = parser.add_mutually_exclusive_group()
+    contrast_args.add_argument("-l", "--light",
+                               help="use less energy for light contrast",
+                               action="store_const", dest="contrast", const=0)
+    contrast_args.add_argument("-m", "--medium",
+                               help="use moderate energy for moderate contrast",
+                               action="store_const", dest="contrast", const=1)
+    contrast_args.add_argument("-d", "--dark",
+                               help="use more energy for high contrast",
+                               action="store_const", dest="contrast", const=2)
+    parser.add_argument("-A", "--address",
+                        help="MAC address of printer in hex (rightmost digits, colons optional)")
+    parser.add_argument("-D", "--debug",
+                        help="output notifications received from printer, in hex",
+                        action="store_true")
+
+    parser.add_argument("--assume-text", help="assume that file type is text", action="store_true", dest="assume_text")
+    parser.add_argument("--pipe", help="treat the file as a continous pipe, listen to it and output everything to printer", action="store_true")
+
+    throttle_args = parser.add_mutually_exclusive_group()
+    throttle_args.add_argument("-t", "--throttle", type=float, default=throttle, metavar="SECONDS",
+                               help="delay between sending command queue packets (default: {})".format(throttle),)
+    throttle_args.add_argument("-T", "--no-throttle",
+                               help="don't wait while sending data",
+                               action="store_const", dest="throttle", const=None)
+    parser.add_argument("-p", "--packetsize", type=int, default=packet_length, metavar="BYTES",
+                        help="length of a command queue packet (default: {})".format(packet_length))
+    args = parser.parse_args()
+    debug = args.debug
+    if args.contrast:
+        contrast = args.contrast
+    if args.address:
+        address = args.address.replace(':', '').upper()
+    throttle = args.throttle
+    packet_length = args.packetsize
+    feed_lines = args.feed
+    header_lines = args.header
+    if args.scale_feed:
+        scale_feed = True
+
+    if args.pipe:
+        if os.path.exists(args.filename):
+            print("pipe file already exists")
+            exit(1)
+        pipe = args.filename
+        print(f"[listening to {pipe}]")
+        try:
+            os.mkfifo(pipe)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(pipe_server(pipe=pipe, eject=args.eject, no_eject=args.no_eject))
+        except KeyboardInterrupt:
+            print("[stopped]")
+            exit(0)
+        finally:
+            os.remove(pipe)
+
+    print_data = produce_print_data(
+        eject=args.eject,
+        no_eject=args.no_eject,
+        assume_text=args.assume_text,
+        filename=args.filename,
+    )
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(connect_and_send([print_data]))
+
