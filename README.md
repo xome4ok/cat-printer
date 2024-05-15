@@ -11,8 +11,7 @@ It will attempt to load the file as an image,
 connect to the first Bluetooth low energy device called "GB01" or "MX06" it finds,
 and print the image.
 
-> [!NOTE]
-> Text rendering is implemented thanks to [this gist](https://gist.github.com/mpomery/6514e521d3d03abce697409609978ede)
+## What's new in this fork?
 
 ### C(h)atting to cat printer
 
